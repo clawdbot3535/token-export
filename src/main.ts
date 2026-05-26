@@ -4,13 +4,14 @@ import {
   type CollectedCollection,
   type CollectedData,
   type CollectedValue,
+  type CollectedVariable,
 } from "./export";
 
 async function collectData(): Promise<CollectedData> {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
   const out: CollectedCollection[] = [];
   for (const col of collections) {
-    const variables = [];
+    const variables: CollectedVariable[] = [];
     for (const id of col.variableIds) {
       const v = await figma.variables.getVariableByIdAsync(id);
       if (!v) continue;

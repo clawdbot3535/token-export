@@ -23,6 +23,10 @@ function Plugin() {
 
   useEffect(() => {
     const offResult = on("EXPORT_RESULT", (result: ExportResult) => {
+      if (result.files.length === 0) {
+        setStatus("No variable collections found.");
+        return;
+      }
       downloadZip(result);
       const warn = result.warnings.length ? ` · ${result.warnings.length} warnings` : "";
       setStatus(`Exported ${result.files.length} file(s)${warn}`);
