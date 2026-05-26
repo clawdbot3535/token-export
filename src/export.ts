@@ -67,9 +67,51 @@ function setNested(root: Record<string, unknown>, path: string[], leaf: TokenLea
   node[path[path.length - 1]] = leaf;
 }
 
+interface ResolveCtx {
+  idToVar: Map<string, CollectedVariable>;
+  idToCol: Map<string, CollectedCollection>;
+}
+
+/** Pick the target collection's modeId matching the consuming mode name,
+ *  else its default mode, else its first mode. */
+function resolveModeId(col: CollectedCollection, modeName: string): string {
+  const byName = col.modes.find((m) => m.name.toLowerCase() === modeName.toLowerCase());
+  if (byName) return byName.modeId;
+  const def = col.modes.find((m) => m.modeId === col.defaultModeId);
+  return (def ?? col.modes[0]).modeId;
+}
+
+/** Follow an alias chain to a final literal for the given consuming mode. */
+function resolveLiteral(
+  value: CollectedValue,
+  resolvedType: FigmaResolvedType,
+  modeName: string,
+  ctx: ResolveCtx,
+  seen: Set<string>,
+): unknown | null {
+  if (!isAlias(value)) return formatLiteral(value, resolvedType);
+  if (seen.has(value.id)) return null; // cycle guard
+  seen.add(value.id);
+  const target = ctx.idToVar.get(value.id);
+  if (!target) return null;
+  const col = ctx.idToCol.get(target.collectionId);
+  if (!col) return null;
+  const next = target.valuesByMode[resolveModeId(col, modeName)];
+  if (next === undefined) return null;
+  return resolveLiteral(next, target.resolvedType, modeName, ctx, seen);
+}
+
 export function buildExport(data: CollectedData): ExportResult {
   const warnings: string[] = [];
   const fileTrees = new Map<string, Record<string, unknown>>();
+
+  const idToVar = new Map<string, CollectedVariable>();
+  const idToCol = new Map<string, CollectedCollection>();
+  for (const col of data.collections) {
+    idToCol.set(col.id, col);
+    for (const v of col.variables) idToVar.set(v.id, v);
+  }
+  const ctx: ResolveCtx = { idToVar, idToCol };
 
   for (const col of data.collections) {
     for (const mode of col.modes) {
@@ -86,17 +128,33 @@ export function buildExport(data: CollectedData): ExportResult {
           warnings.push(`${v.name}: no value for mode "${mode.name}"`);
           continue;
         }
+
+        const extensions: Record<string, unknown> = {
+          "com.figma.variableId": v.id,
+          "com.figma.scopes": v.scopes,
+        };
+
+        let value: unknown;
         if (isAlias(raw)) {
-          // Alias handling is implemented in Task 5.
-          continue;
+          value = resolveLiteral(raw, v.resolvedType, mode.name, ctx, new Set());
+          if (value === null) {
+            warnings.push(`${v.name}: unresolvable alias in mode "${mode.name}"`);
+          }
+          const target = ctx.idToVar.get(raw.id);
+          if (target) {
+            extensions["com.figma.aliasData"] = {
+              targetVariableName: target.name,
+              targetVariableSetName: ctx.idToCol.get(target.collectionId)?.name ?? "",
+            };
+          }
+        } else {
+          value = formatLiteral(raw, v.resolvedType);
         }
+
         const leaf: TokenLeaf = {
           $type: tokenTypeFor(v.resolvedType),
-          $value: formatLiteral(raw, v.resolvedType),
-          $extensions: {
-            "com.figma.variableId": v.id,
-            "com.figma.scopes": v.scopes,
-          },
+          $value: value,
+          $extensions: extensions,
         };
         setNested(tree, v.name.split("/"), leaf);
       }
