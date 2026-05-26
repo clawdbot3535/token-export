@@ -105,17 +105,19 @@ export interface GitProvider {
 `createGitHubProvider(fetchFn = fetch): GitProvider`. `commit(req)` runs the **Git Data API** so all
 files land in one commit (not six Contents-API PUTs):
 
-1. `GET /repos/{owner}/{repo}/git/ref/heads/{branch}` → base commit sha. (404 → `not-found`;
-   409/"empty" → `empty-repo`.)
-2. `GET /repos/{owner}/{repo}/git/commits/{baseSha}` → base tree sha.
+1. `GET /repos/{owner}/{repo}/git/ref/heads/{branch}` → base commit sha. **404 → `not-found`.
+   409 ("Git Repository is empty") → no ref yet; take the empty-repo path below.**
+2. (existing branch only) `GET /repos/{owner}/{repo}/git/commits/{baseSha}` → base tree sha.
 3. For each file: `POST /repos/{owner}/{repo}/git/blobs` `{ content, encoding: "utf-8" }` → blob sha.
-4. `POST /repos/{owner}/{repo}/git/trees` `{ base_tree, tree: [{ path, mode: "100644", type: "blob", sha }] }` → new tree sha.
-5. `POST /repos/{owner}/{repo}/git/commits` `{ message, tree, parents: [baseSha] }` → new commit sha + html_url.
-6. `PATCH /repos/{owner}/{repo}/git/refs/heads/{branch}` `{ sha: newCommitSha }` → done.
+4. `POST /repos/{owner}/{repo}/git/trees` `{ base_tree?, tree: [{ path, mode: "100644", type: "blob", sha }] }` → new tree sha. (`base_tree` omitted on the empty-repo path.)
+5. `POST /repos/{owner}/{repo}/git/commits` `{ message, tree, parents }` → new commit sha + html_url. (`parents: [baseSha]` for an existing branch; `parents: []` for the empty-repo orphan commit.)
+6. **Existing branch:** `PATCH /repos/{owner}/{repo}/git/refs/heads/{branch}` `{ sha }`. **Empty repo:** `POST /repos/{owner}/{repo}/git/refs` `{ ref: "refs/heads/{branch}", sha }` → creates the branch.
 
 All requests send `Authorization: Bearer {token}`, `Accept: application/vnd.github+json`,
-`X-GitHub-Api-Version: 2022-11-28`. The ref update (step 6) is the single atomic switch — if any
-earlier step fails, the branch is untouched. Non-2xx responses map to `CommitError` by status.
+`X-GitHub-Api-Version: 2022-11-28`. The ref write (step 6) is the single atomic switch — if any
+earlier step fails, the branch is untouched. A brand-new empty repository is initialized
+automatically (orphan first commit), so no manual seeding is required. Non-2xx responses map to
+`CommitError` by status.
 
 ### Data flow
 
@@ -147,8 +149,9 @@ Default `Update design tokens (N files) — <ISO timestamp>`; the UI may let the
 
 Each `CommitErrorKind` maps to a clear UI message: `auth` → "GitHub token invalid or missing
 Contents write permission"; `not-found` → "Repo or branch not found — check owner/repo/branch";
-`empty-repo` → "Target branch has no commits yet — create an initial commit first"; `network` →
-"Network error reaching api.github.com"; `unexpected` → the raw status/message. The zip path keeps
+`network` → "Network error reaching api.github.com"; `unexpected` → the raw status/message.
+(`empty-repo` is no longer surfaced for the normal flow — an empty repo is initialized
+automatically; the kind remains as a defensive mapping.) The zip path keeps
 v1's behavior (empty-files guard, error status).
 
 ## Testing

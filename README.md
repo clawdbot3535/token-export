@@ -36,7 +36,8 @@ offline snapshot you drag into the inspector.
    **Save settings** (stored in Figma `clientStorage`; the token stays in the plugin's main
    thread and is never sent to the UI).
 3. Click **Commit to GitHub** — the six `*.tokens.json` files are written as one atomic commit;
-   the commit URL appears in the status line.
+   the commit URL appears in the status line. A brand-new **empty** repository is initialized
+   automatically (orphan first commit) — no manual first commit needed.
 
 **Download .zip** still works as an offline snapshot (filename `tokens-YYYYMMDD-HHMMSS.zip`).
 
