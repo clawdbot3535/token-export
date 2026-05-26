@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "target": "ES2020",
+    "typeRoots": ["node_modules/@figma", "node_modules/@types"],
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
