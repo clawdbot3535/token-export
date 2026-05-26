@@ -40,14 +40,16 @@ function mockFetch(overrides: Record<string, { status: number; body?: unknown }>
     if (method === "POST" && url.includes("/git/trees")) return json({ sha: "NEWTREE" });
     if (method === "POST" && url.includes("/git/commits"))
       return json({ sha: "NEWCOMMIT", html_url: "https://github.com/me/tokens/commit/NEWCOMMIT" });
+    if (method === "POST" && url.endsWith("/git/refs"))
+      return json({ ref: "refs/heads/main", object: { sha: "NEWCOMMIT" } });
     if (method === "PATCH" && url.includes("/git/refs/heads/")) return json({ object: { sha: "NEWCOMMIT" } });
     throw new Error(`unexpected ${method} ${url}`);
   };
   return { fn: fn as unknown as typeof fetch, calls };
 }
 
-describe("createGitHubProvider.commit — happy path", () => {
-  it("creates one commit referencing all blobs and returns the commit url", async () => {
+describe("createGitHubProvider.commit — non-empty repo (existing branch)", () => {
+  it("creates one commit on top of the base and returns the commit url", async () => {
     const { fn, calls } = mockFetch();
     const result = await createGitHubProvider(fn).commit(req(2));
 
@@ -75,6 +77,32 @@ describe("createGitHubProvider.commit — happy path", () => {
   });
 });
 
+describe("createGitHubProvider.commit — empty repo (no ref yet)", () => {
+  it("creates an orphan first commit and POSTs the ref", async () => {
+    const { fn, calls } = mockFetch({ "/git/ref/heads/": { status: 409 } });
+    const result = await createGitHubProvider(fn).commit(req(2));
+
+    expect(result).toEqual({
+      sha: "NEWCOMMIT",
+      commitUrl: "https://github.com/me/tokens/commit/NEWCOMMIT",
+    });
+
+    // no base commit lookup on an empty repo
+    expect(calls.some((c) => c.url.includes("/git/commits/"))).toBe(false);
+
+    const treePost = calls.find((c) => c.url.includes("/git/trees"))!;
+    expect(treePost.body.base_tree).toBeUndefined();
+
+    const commitPost = calls.find((c) => c.url.endsWith("/git/commits"))!;
+    expect(commitPost.body.parents).toEqual([]);
+
+    // ref created via POST, not PATCH
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    const refPost = calls.find((c) => c.method === "POST" && c.url.endsWith("/git/refs"))!;
+    expect(refPost.body).toEqual({ ref: "refs/heads/main", sha: "NEWCOMMIT" });
+  });
+});
+
 describe("createGitHubProvider.commit — errors", () => {
   it("maps 401 to auth", async () => {
     const { fn } = mockFetch({ "/git/ref/heads/": { status: 401 } });
@@ -83,10 +111,6 @@ describe("createGitHubProvider.commit — errors", () => {
   it("maps 404 to not-found", async () => {
     const { fn } = mockFetch({ "/git/ref/heads/": { status: 404 } });
     await expect(createGitHubProvider(fn).commit(req())).rejects.toMatchObject({ kind: "not-found" });
-  });
-  it("maps 409 to empty-repo", async () => {
-    const { fn } = mockFetch({ "/git/ref/heads/": { status: 409 } });
-    await expect(createGitHubProvider(fn).commit(req())).rejects.toMatchObject({ kind: "empty-repo" });
   });
   it("maps a thrown fetch to network", async () => {
     const { fn } = mockFetch({ "/git/ref/heads/": { status: -1 } });
