@@ -1,0 +1,33 @@
+{
+  "name": "figma-token-export",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "build-figma-plugin --typecheck --minify",
+    "watch": "build-figma-plugin --typecheck --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@create-figma-plugin/ui": "^4",
+    "@create-figma-plugin/utilities": "^4",
+    "fflate": "^0.8.2",
+    "preact": "^10"
+  },
+  "devDependencies": {
+    "@create-figma-plugin/build": "^4",
+    "@figma/plugin-typings": "^1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "figma-plugin": {
+    "editorType": ["figma"],
+    "id": "figma-token-export",
+    "name": "Token Export (Inspector)",
+    "main": "src/main.ts",
+    "ui": "src/ui.tsx",
+    "documentAccess": "dynamic-page",
+    "networkAccess": { "allowedDomains": ["none"] }
+  }
+}
