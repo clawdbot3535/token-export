@@ -40,3 +40,6 @@ Run the plugin, click **Export tokens**, then drag the downloaded `tokens.zip` i
 - The collection→filename mapping in `src/mapping.ts` assumes collection names containing
   `color`/`dimension`/`typography`/`global` and `light`/`dark` modes. Adjust the constants there if
   your file uses different names.
+- Collections that merge into `global.tokens.json` and whose variables are not self-prefixed
+  (e.g. `components/sidebar`) lose their namespace and surface as ungrouped tokens in the
+  inspector. Deferred — see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
