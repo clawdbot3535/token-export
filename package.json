@@ -28,6 +28,9 @@
     "main": "src/main.ts",
     "ui": "src/ui.tsx",
     "documentAccess": "dynamic-page",
-    "networkAccess": { "allowedDomains": ["none"] }
+    "networkAccess": {
+      "allowedDomains": ["https://api.github.com"],
+      "reasoning": "Commit exported design tokens to the configured GitHub repository."
+    }
   }
 }
