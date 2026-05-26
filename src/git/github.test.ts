@@ -36,12 +36,12 @@ function mockFetch(overrides: Record<string, { status: number; body?: unknown }>
     }
     if (method === "GET" && url.includes("/git/ref/heads/")) return json({ object: { sha: "BASE" } });
     if (method === "GET" && url.includes("/git/commits/")) return json({ tree: { sha: "BASETREE" } });
+    if (method === "PUT" && url.includes("/contents/"))
+      return json({ commit: { sha: "INITSHA", tree: { sha: "INITTREE" }, html_url: "https://github.com/me/tokens/commit/INITSHA" } }, 201);
     if (method === "POST" && url.includes("/git/blobs")) return json({ sha: `BLOB${++blob}` });
     if (method === "POST" && url.includes("/git/trees")) return json({ sha: "NEWTREE" });
     if (method === "POST" && url.includes("/git/commits"))
       return json({ sha: "NEWCOMMIT", html_url: "https://github.com/me/tokens/commit/NEWCOMMIT" });
-    if (method === "POST" && url.endsWith("/git/refs"))
-      return json({ ref: "refs/heads/main", object: { sha: "NEWCOMMIT" } });
     if (method === "PATCH" && url.includes("/git/refs/heads/")) return json({ object: { sha: "NEWCOMMIT" } });
     throw new Error(`unexpected ${method} ${url}`);
   };
@@ -57,6 +57,9 @@ describe("createGitHubProvider.commit — non-empty repo (existing branch)", () 
       sha: "NEWCOMMIT",
       commitUrl: "https://github.com/me/tokens/commit/NEWCOMMIT",
     });
+
+    // no Contents bootstrap on a non-empty repo
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
 
     const blobPosts = calls.filter((c) => c.method === "POST" && c.url.includes("/git/blobs"));
     expect(blobPosts.length).toBe(2);
@@ -78,7 +81,7 @@ describe("createGitHubProvider.commit — non-empty repo (existing branch)", () 
 });
 
 describe("createGitHubProvider.commit — empty repo (no ref yet)", () => {
-  it("creates an orphan first commit and POSTs the ref", async () => {
+  it("bootstraps an initial commit via the Contents API, then commits tokens on top", async () => {
     const { fn, calls } = mockFetch({ "/git/ref/heads/": { status: 409 } });
     const result = await createGitHubProvider(fn).commit(req(2));
 
@@ -87,19 +90,27 @@ describe("createGitHubProvider.commit — empty repo (no ref yet)", () => {
       commitUrl: "https://github.com/me/tokens/commit/NEWCOMMIT",
     });
 
-    // no base commit lookup on an empty repo
-    expect(calls.some((c) => c.url.includes("/git/commits/"))).toBe(false);
+    // bootstrap: PUT a README via the Contents API to create the first commit + branch
+    const initPut = calls.find((c) => c.method === "PUT" && c.url.includes("/contents/README.md"))!;
+    expect(initPut.body).toEqual({
+      message: "Initialize repository",
+      content: "IyBEZXNpZ24gdG9rZW5zCg==",
+      branch: "main",
+    });
+
+    // base comes from the bootstrap response — no base-commit GET on an empty repo
+    expect(calls.some((c) => c.method === "GET" && c.url.includes("/git/commits/"))).toBe(false);
 
     const treePost = calls.find((c) => c.url.includes("/git/trees"))!;
-    expect(treePost.body.base_tree).toBeUndefined();
+    expect(treePost.body.base_tree).toBe("INITTREE");
 
     const commitPost = calls.find((c) => c.url.endsWith("/git/commits"))!;
-    expect(commitPost.body.parents).toEqual([]);
+    expect(commitPost.body.parents).toEqual(["INITSHA"]);
 
-    // ref created via POST, not PATCH
-    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
-    const refPost = calls.find((c) => c.method === "POST" && c.url.endsWith("/git/refs"))!;
-    expect(refPost.body).toEqual({ ref: "refs/heads/main", sha: "NEWCOMMIT" });
+    // branch exists after bootstrap → PATCH (not POST /git/refs)
+    const refPatch = calls.find((c) => c.method === "PATCH")!;
+    expect(refPatch.body).toEqual({ sha: "NEWCOMMIT" });
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/git/refs"))).toBe(false);
   });
 });
 

@@ -1,8 +1,11 @@
-// GitHub GitProvider using the Git Data API so all files land in ONE commit.
-// fetch is injected for testability (defaults to the global Fetch API, which
-// Figma exposes in the plugin main thread). When the target branch has no
-// commits yet (empty repo), an orphan first commit is created and the ref is
-// established with POST /git/refs.
+// GitHub GitProvider using the Git Data API so all token files land in ONE
+// commit. fetch is injected for testability (defaults to the global Fetch API,
+// which Figma exposes in the plugin main thread).
+//
+// Empty repositories: the Git Data API cannot create objects without an
+// existing commit (POST /git/blobs returns 409 on a zero-commit repo), so we
+// bootstrap an initial commit + branch via the Contents API, then build the
+// token commit on top via the normal Git Data path.
 
 import {
   CommitError,
@@ -12,6 +15,10 @@ import {
 } from "./provider";
 
 const API = "https://api.github.com";
+
+// base64 of "# Design tokens\n" — hardcoded so no runtime base64 encoder is
+// needed (btoa is not guaranteed in the Figma main thread).
+const README_CONTENT_B64 = "IyBEZXNpZ24gdG9rZW5zCg==";
 
 function headers(token: string): Record<string, string> {
   return {
@@ -77,12 +84,21 @@ export function createGitHubProvider(fetchFn: typeof fetch = fetch): GitProvider
     async commit(req: CommitRequest): Promise<CommitResult> {
       const base = `${API}/repos/${req.owner}/${req.repo}`;
 
-      const baseSha = await getBaseSha(base, req.branch, req.token);
+      let baseSha = await getBaseSha(base, req.branch, req.token);
+      let baseTree: string;
 
-      let baseTree: string | undefined;
-      if (baseSha) {
+      if (baseSha === null) {
+        // Empty repo: bootstrap an initial commit + branch via the Contents API.
+        const init = await call("PUT", `${base}/contents/README.md`, req.token, {
+          message: "Initialize repository",
+          content: README_CONTENT_B64,
+          branch: req.branch,
+        });
+        baseSha = init.commit.sha as string;
+        baseTree = init.commit.tree.sha as string;
+      } else {
         const baseCommit = await call("GET", `${base}/git/commits/${baseSha}`, req.token);
-        baseTree = baseCommit.tree.sha;
+        baseTree = baseCommit.tree.sha as string;
       }
 
       const tree: Array<{ path: string; mode: string; type: string; sha: string }> = [];
@@ -94,27 +110,18 @@ export function createGitHubProvider(fetchFn: typeof fetch = fetch): GitProvider
         tree.push({ path: f.path, mode: "100644", type: "blob", sha: blob.sha });
       }
 
-      const newTree = await call(
-        "POST",
-        `${base}/git/trees`,
-        req.token,
-        baseTree ? { base_tree: baseTree, tree } : { tree },
-      );
+      const newTree = await call("POST", `${base}/git/trees`, req.token, {
+        base_tree: baseTree,
+        tree,
+      });
 
       const commit = await call("POST", `${base}/git/commits`, req.token, {
         message: req.message,
         tree: newTree.sha,
-        parents: baseSha ? [baseSha] : [],
+        parents: [baseSha],
       });
 
-      if (baseSha) {
-        await call("PATCH", `${base}/git/refs/heads/${req.branch}`, req.token, { sha: commit.sha });
-      } else {
-        await call("POST", `${base}/git/refs`, req.token, {
-          ref: `refs/heads/${req.branch}`,
-          sha: commit.sha,
-        });
-      }
+      await call("PATCH", `${base}/git/refs/heads/${req.branch}`, req.token, { sha: commit.sha });
 
       return { sha: commit.sha, commitUrl: commit.html_url };
     },
