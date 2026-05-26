@@ -25,18 +25,36 @@ In the Figma desktop app: Quick Actions → `Import plugin from manifest…` →
 
 ## Use
 
-Run the plugin, click **Export tokens**, then drag the downloaded `tokens.zip` into the inspector.
+Run the plugin. Either **Commit to GitHub** (versioned, see below) or **Download .zip** for an
+offline snapshot you drag into the inspector.
+
+## Commit to GitHub
+
+1. Create a **fine-grained Personal Access Token** scoped to your tokens repo with
+   **Contents: read and write**.
+2. In the plugin, fill in **owner / repo / branch / path**, paste the **PAT**, and click
+   **Save settings** (stored in Figma `clientStorage`; the token stays in the plugin's main
+   thread and is never sent to the UI).
+3. Click **Commit to GitHub** — the six `*.tokens.json` files are written as one atomic commit;
+   the commit URL appears in the status line. A brand-new **empty** repository is initialized
+   automatically (orphan first commit) — no manual first commit needed.
+
+**Download .zip** still works as an offline snapshot (filename `tokens-YYYYMMDD-HHMMSS.zip`).
 
 ## Architecture
 
-- `src/format.ts`, `src/mapping.ts`, `src/export.ts` — pure, unit-tested core.
-- `src/main.ts` — reads the Figma variables API (impure).
-- `src/ui.tsx` — export button, zips with `fflate`, triggers the download.
+- `src/format.ts`, `src/mapping.ts`, `src/export.ts` — pure, unit-tested token core.
+- `src/timestamp.ts`, `src/settings.ts`, `src/git/` (`provider.ts` + `github.ts`) — pure helpers and
+  the GitHub commit provider (Git Data API, injectable `fetch` → unit-tested).
+- `src/main.ts` — reads the Figma variables API, stores settings/PAT in `clientStorage`, runs the
+  commit in the main thread (impure).
+- `src/ui.tsx` — settings form, commit / zip buttons, status.
 
 ## Limitations (v1)
 
 - Local variables only (no styles, no remote/library variables).
-- No Git sync (export → drop).
+- GitHub commit is one-way (Figma → repo) via PAT; OAuth, GitLab/other providers, and pulling
+  tokens back into Figma are not implemented.
 - The collection→filename mapping in `src/mapping.ts` assumes collection names containing
   `color`/`dimension`/`typography`/`global` and `light`/`dark` modes. Adjust the constants there if
   your file uses different names.
