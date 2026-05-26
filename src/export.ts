@@ -88,7 +88,7 @@ function resolveLiteral(
   modeName: string,
   ctx: ResolveCtx,
   seen: Set<string>,
-): unknown | null {
+): unknown {
   if (!isAlias(value)) return formatLiteral(value, resolvedType);
   if (seen.has(value.id)) return null; // cycle guard
   seen.add(value.id);

@@ -202,4 +202,104 @@ describe("buildExport — aliases", () => {
     const tree = parse(files, "light.tokens.json");
     expect(tree.color.x.$value).toBeNull();
   });
+
+  it("resolves a transitive 2-hop chain to the final literal but records the direct target", () => {
+    // button/fg (component) -> color/fg (typography) -> color/white (color, literal).
+    // Each token lives in its own distinctly-named single-mode collection so it
+    // routes to a distinct file (see filenameFor in src/mapping.ts):
+    //   primitives/color      -> color.tokens.json
+    //   primitives/typography -> typography.tokens.json
+    //   components/global     -> global.tokens.json
+    const chain: CollectedData = {
+      collections: [
+        {
+          id: "PC",
+          name: "primitives/color",
+          defaultModeId: "p1",
+          modes: [{ modeId: "p1", name: "Mode 1" }],
+          variables: [
+            {
+              id: "WHITE",
+              name: "color/white",
+              resolvedType: "COLOR",
+              valuesByMode: { p1: { r: 1, g: 1, b: 1, a: 1 } },
+              scopes: ["ALL_SCOPES"],
+              collectionId: "PC",
+            },
+          ],
+        },
+        {
+          id: "SEM",
+          name: "primitives/typography",
+          defaultModeId: "s1",
+          modes: [{ modeId: "s1", name: "Mode 1" }],
+          variables: [
+            {
+              id: "FG",
+              name: "color/fg",
+              resolvedType: "COLOR",
+              valuesByMode: { s1: { type: "VARIABLE_ALIAS", id: "WHITE" } },
+              scopes: ["ALL_SCOPES"],
+              collectionId: "SEM",
+            },
+          ],
+        },
+        {
+          id: "CMP",
+          name: "components/global",
+          defaultModeId: "c1",
+          modes: [{ modeId: "c1", name: "Mode 1" }],
+          variables: [
+            {
+              id: "BTN_FG",
+              name: "button/fg",
+              resolvedType: "COLOR",
+              valuesByMode: { c1: { type: "VARIABLE_ALIAS", id: "FG" } },
+              scopes: ["ALL_SCOPES"],
+              collectionId: "CMP",
+            },
+          ],
+        },
+      ],
+    };
+
+    const tree = parse(buildExport(chain).files, "global.tokens.json");
+    expect(tree.button.fg.$value.hex).toBe("#FFFFFF");
+    expect(tree.button.fg.$extensions["com.figma.aliasData"].targetVariableName).toBe("color/fg");
+  });
+
+  it("guards against an alias cycle: warns and emits null $value", () => {
+    const cyclic: CollectedData = {
+      collections: [
+        {
+          id: "CY",
+          name: "primitives/color",
+          defaultModeId: "m1",
+          modes: [{ modeId: "m1", name: "Mode 1" }],
+          variables: [
+            {
+              id: "A",
+              name: "color/a",
+              resolvedType: "COLOR",
+              valuesByMode: { m1: { type: "VARIABLE_ALIAS", id: "B" } },
+              scopes: [],
+              collectionId: "CY",
+            },
+            {
+              id: "B",
+              name: "color/b",
+              resolvedType: "COLOR",
+              valuesByMode: { m1: { type: "VARIABLE_ALIAS", id: "A" } },
+              scopes: [],
+              collectionId: "CY",
+            },
+          ],
+        },
+      ],
+    };
+    const { files, warnings } = buildExport(cyclic);
+    expect(warnings.some((w) => w.includes("color/a") || w.includes("color/b"))).toBe(true);
+    const tree = parse(files, "color.tokens.json");
+    expect(tree.color.a.$value).toBeNull();
+  });
 });
